@@ -172,9 +172,8 @@ CUDA_VISIBLE_DEVICES=0,1,2,3
 XLA_PYTHON_CLIENT_MEM_FRACTION=0.82
 
 # --- WandB -------------------------------------------------------------------
-# Get your key from https://wandb.ai/authorize
-# Leave blank to use WANDB_MODE=disabled (no online logging).
-WANDB_API_KEY=
+# Shared team key — replace with your own if needed.
+WANDB_API_KEY=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
 WANDB_PROJECT=lapa-lora-jax
 WANDB_ENTITY=
 WANDB_MODE=online
