@@ -1,0 +1,112 @@
+# =============================================================================
+# LAPA-7B  Stage-3 LoRA fine-tune on LIBERO-90  —  rsLoRA Option B
+#
+# "Slightly more aggressive" rsLoRA run.
+#   rank=64, alpha=32  →  rsLoRA scale = alpha/√rank = 32/8 = 4.0
+#   lr=1e-4,  plus_ratio=1.0 (no differential LR between lora_A/B)
+#
+# Differs from Option A only in alpha (16 → 32), giving 2× stronger adapter
+# scaling while keeping everything else conservative.
+#
+# --- Changes vs libero90_lora_v2.yaml (the "v2 stable" baseline) ---------
+#   optimizer.lr              2e-4  → 1e-4
+#   optimizer.end_lr          1e-5  → 1e-5   (unchanged — 10× cosine tail)
+#   optimizer.lr_warmup_steps  500  → 200
+#   optimizer.lr_decay_steps 25000  → 15000
+#   optimizer.weight_decay    0.01  → 0.0
+#   train.total_steps        25000  → 15000
+#   lora.alpha                  64  → 32     (rsLoRA scale 8.0 → 4.0)
+#   lora.plus_ratio            4.0  → 1.0    (disabled — equal LR for A and B)
+#
+# --- How to run ----------------------------------------------------------
+#   bash scripts/run_docker.sh configs/libero90_rslora_optionB.yaml
+#
+# Override any field without editing this file:
+#   bash scripts/run_docker.sh configs/libero90_rslora_optionB.yaml \
+#       -- train --override optimizer.lr=8e-5
+#
+# First time on a new machine?  Run setup first:
+#   bash scripts/setup.sh && docker compose build
+# =============================================================================
+
+# ---- model / checkpoint ----
+model:
+  config: "7b"
+  action_vocab_size: 245
+  delta_vocab_size: 8
+
+checkpoint:
+  load: "params::/checkpoints/params"
+  tokenizer: "/checkpoints/tokenizer.model"
+  save_optimizer_state: false
+  save_milestone_freq: 2500
+  autoresume: false
+
+data:
+  type: "json_vision_delta_action"
+  path: "/data/libero90_jsonl_v2/train.jsonl"
+  seq_length: 384
+  batch_size: 32
+  n_tokens_per_action: 7
+  n_tokens_per_delta: 4
+  max_n_frames: 1
+  img_aug: false
+  use_data_sharded_loader: true
+
+# ---- training ----
+train:
+  total_steps: 15000
+  log_freq: 10
+  eval_steps: 0
+  eval_log_freq: 100
+  save_model_freq: 0
+  modality: "vision,action,delta"
+  dtype: "bf16"
+  mesh_dim: "-1,2,1,1"            # dp=auto, fsdp=2, tp=1, sp=1
+
+# ---- optimizer (AdamW) ----
+optimizer:
+  type: "adamw"
+  lr: 1.0e-4
+  end_lr: 1.0e-5                  # 10× cosine tail
+  lr_warmup_steps: 200
+  lr_decay_steps: 15000
+  weight_decay: 0.0
+  clip_gradient: 1.0
+  bf16_momentum: true
+  accumulate_gradient_steps: 4    # effective batch = 32 × 4 = 128
+
+# ---- LoRA ----
+lora:
+  enabled: true
+  rank: 64
+  alpha: 32                       # rsLoRA scale = 32/√64 = 4.0
+  use_rslora: true
+  plus_ratio: 1.0                 # disabled: lora_B lr == lora_A lr
+  train_patterns: "lora_A,lora_B,action_head,vision_head,delta_head"
+  heads_lr_multiplier: 2.0
+
+# ---- LLaMA inner config ----
+llama:
+  theta: 50000000
+  max_sequence_length: 2048
+  use_flash_attention: true
+  scan_attention: true
+  scan_query_chunk_size: 512
+  scan_key_chunk_size: 1024
+  remat_attention: "nothing_saveable"
+  scan_mlp: true
+  scan_mlp_chunk_size: 8192
+  remat_mlp: "nothing_saveable"
+  remat_block: "nothing_saveable"
+  scan_layers: true
+
+# ---- logging ----
+logger:
+  project_id: "lapa-lora-jax"
+  experiment_id: "libero90_rslora_optionB"
+  experiment_note: "rslora_r64_a32_scale4_lr1e4_noloraplus_15k"
+  output_dir: "/workspace/outputs/libero90_rslora_optionB"
+  wandb_dir: "/workspace/outputs/libero90_rslora_optionB/wandb"
+  online: true
+  append_uuid: false
