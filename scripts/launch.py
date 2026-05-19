@@ -23,6 +23,51 @@ from pathlib import Path
 import yaml
 
 
+def _count_gpus() -> int:
+    """Return the number of GPUs that will actually be used."""
+    cvd = os.environ.get("CUDA_VISIBLE_DEVICES", "").strip()
+    if cvd == "" or cvd.lower() == "all":
+        try:
+            r = subprocess.run(
+                ["nvidia-smi", "-L"], capture_output=True, text=True, timeout=5
+            )
+            lines = [l for l in r.stdout.strip().splitlines() if l.startswith("GPU")]
+            return max(1, len(lines))
+        except Exception:
+            return 1
+    if cvd == "-1":  # CUDA disabled
+        return 0
+    return len(cvd.split(","))
+
+
+def _resolve_mesh_dim(mesh_dim_str: str, n_gpus: int) -> str:
+    """Make mesh_dim valid for the actual GPU count.
+
+    Rules:
+      - Clamp fsdp/tp/sp to n_gpus (can't shard across more devices than exist).
+      - If dp == -1, auto-fill so that dp * fsdp * tp * sp == n_gpus.
+      - If the fixed axes already exceed n_gpus, fall back to pure data-parallel
+        (fsdp=1, tp=1, sp=1, dp=n_gpus).
+    """
+    parts = [int(x) for x in mesh_dim_str.split(",")]
+    dp, fsdp, tp, sp = parts
+
+    # Clamp individual axes
+    fsdp = min(fsdp, n_gpus)
+    tp   = min(tp,   n_gpus)
+    sp   = min(sp,   n_gpus)
+
+    fixed = fsdp * tp * sp
+    if fixed > n_gpus or n_gpus % fixed != 0:
+        # Fall back: pure DP, no model parallelism
+        return f"{n_gpus},1,1,1"
+
+    if dp == -1:
+        dp = n_gpus // fixed
+
+    return f"{dp},{fsdp},{tp},{sp}"
+
+
 def _flatten_llama(cfg: dict) -> str:
     """Render the --update_llama_config=dict(...) argument."""
     items = []
@@ -54,13 +99,15 @@ def _apply_overrides(cfg: dict, overrides: list[str]) -> None:
         node[parts[-1]] = val
 
 
-def build_args(cfg: dict) -> list[str]:
+def build_args(cfg: dict, n_gpus: int) -> list[str]:
     model, ckpt, data, train, opt, lora, llama, log = (
         cfg["model"], cfg["checkpoint"], cfg["data"],
         cfg["train"], cfg["optimizer"], cfg["lora"],
         cfg["llama"], cfg["logger"],
     )
 
+    mesh_dim = _resolve_mesh_dim(train["mesh_dim"], n_gpus)
+    cfg["_resolved_mesh_dim"] = mesh_dim  # stash for banner
     # Honour WANDB_MODE: offline/disabled → logger.online=False
     wandb_mode = os.environ.get("WANDB_MODE", "online").lower()
     online = bool(log.get("online", True)) and wandb_mode == "online"
@@ -71,7 +118,7 @@ def build_args(cfg: dict) -> list[str]:
 
     args = [
         f"--modality={train['modality']}",
-        f"--mesh_dim={train['mesh_dim']}",
+        f"--mesh_dim={mesh_dim}",
         f"--dtype={train['dtype']}",
         f"--total_steps={train['total_steps']}",
         f"--log_freq={train['log_freq']}",
@@ -147,8 +194,9 @@ def main() -> int:
     if overrides:
         _apply_overrides(cfg, overrides)
 
+    n_gpus = _count_gpus()
     python = os.environ.get("LAPA_PYTHON", sys.executable)
-    cmd = [python, "-u", "-m", "latent_pretraining.train", *build_args(cfg)]
+    cmd = [python, "-u", "-m", "latent_pretraining.train", *build_args(cfg, n_gpus)]
 
     extra = os.environ.get("LAPA_EXTRA_ARGS", "").strip()
     if extra:
@@ -160,7 +208,8 @@ def main() -> int:
     print(f"  wandb  : mode={os.environ.get('WANDB_MODE', 'online')}  "
           f"project={os.environ.get('WANDB_PROJECT', cfg['logger']['project_id'])}  "
           f"run={os.environ.get('WANDB_RUN_NAME', cfg['logger']['experiment_id'])}", flush=True)
-    print(f"  GPUs   : {os.environ.get('CUDA_VISIBLE_DEVICES', '(all visible)')}", flush=True)
+    print(f"  GPUs   : {os.environ.get('CUDA_VISIBLE_DEVICES', '(all visible)')}  "
+          f"(n={n_gpus})  mesh={cfg.get('_resolved_mesh_dim', '?')}", flush=True)
     print(f"  resume : {cfg['checkpoint']['load']}", flush=True)
     print("=" * 78, flush=True)
     print("CMD: " + " ".join(shlex.quote(c) for c in cmd), flush=True)
