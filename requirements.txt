@@ -1,0 +1,41 @@
+# LAPA LoRA fine-tuning — pinned to the versions used for the validated v2 recipe.
+# JAX/jaxlib must be installed separately via the CUDA-specific find-links URL
+# (see Dockerfile). Everything else is pip-installable from PyPI / git.
+
+# Core JAX/Flax stack (do NOT bump without re-validating the v2 recipe)
+flax==0.7.0
+optax==0.1.7
+chex==0.1.82
+
+# Tooling library used by train.py (StreamingCheckpointer, OptimizerFactory, ...)
+git+https://github.com/lhao499/tux.git@main
+
+# Data + tokenization
+transformers==4.29.2
+datasets==2.13.0
+sentencepiece
+tiktoken
+einops
+ml_collections
+Pillow
+imageio[ffmpeg]
+decord
+albumentations
+scipy==1.12.0
+
+# Logging / experiment tracking
+wandb>=0.16,<0.27
+tqdm
+
+# Misc
+gcsfs
+requests
+typing-extensions
+absl-py
+
+# TensorFlow (data pipeline only, no GPU compute)
+tensorflow==2.15.0
+
+# Preprocessing (LIBERO HDF5 → JSONL, used by `docker compose run --rm preprocess`)
+h5py
+pandas

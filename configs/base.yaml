@@ -1,0 +1,82 @@
+# =============================================================================
+# base.yaml — default field values for LAPA-7B LoRA fine-tuning
+#
+# Override in a task-specific config (e.g. libero90_lora_v2.yaml).
+# All container paths assume the docker-compose volume mounts from .env.
+# =============================================================================
+
+model:
+  config: "7b"
+  action_vocab_size: 245
+  delta_vocab_size: 8
+
+checkpoint:
+  load: "params::/checkpoints/params"
+  tokenizer: "/checkpoints/tokenizer.model"
+  save_optimizer_state: false
+  save_milestone_freq: 2500
+  autoresume: false
+
+data:
+  type: "json_vision_delta_action"
+  path: "/data/train.jsonl"
+  seq_length: 384
+  batch_size: 32
+  n_tokens_per_action: 7
+  n_tokens_per_delta: 4
+  max_n_frames: 1
+  img_aug: false
+  use_data_sharded_loader: true
+
+train:
+  total_steps: 25000
+  log_freq: 10
+  eval_steps: 0
+  eval_log_freq: 100
+  save_model_freq: 0
+  modality: "vision,action,delta"
+  dtype: "bf16"
+  mesh_dim: "-1,2,1,1"            # dp=auto, fsdp=2, tp=1, sp=1
+
+optimizer:
+  type: "adamw"
+  lr: 2.0e-4
+  end_lr: 1.0e-5
+  lr_warmup_steps: 500
+  lr_decay_steps: 25000
+  weight_decay: 0.01
+  clip_gradient: 1.0              # validated safe for LLM LoRA FT
+  bf16_momentum: true
+  accumulate_gradient_steps: 4    # effective batch = batch_size * accum_steps
+
+lora:
+  enabled: true
+  rank: 64
+  alpha: 64
+  use_rslora: true                # scaling = alpha / sqrt(rank)
+  plus_ratio: 4.0                 # lora_B lr = plus_ratio × lora_A lr
+  train_patterns: "lora_A,lora_B,action_head,vision_head,delta_head"
+  heads_lr_multiplier: 2.0
+
+llama:
+  theta: 50000000
+  max_sequence_length: 2048
+  use_flash_attention: true
+  scan_attention: true
+  scan_query_chunk_size: 512
+  scan_key_chunk_size: 1024
+  remat_attention: "nothing_saveable"
+  scan_mlp: true
+  scan_mlp_chunk_size: 8192
+  remat_mlp: "nothing_saveable"
+  remat_block: "nothing_saveable"
+  scan_layers: true
+
+logger:
+  project_id: "lapa-lora-jax"
+  experiment_id: "lapa_lora_run"
+  experiment_note: ""
+  output_dir: "/workspace/outputs/lapa_lora_run"
+  wandb_dir: "/workspace/outputs/lapa_lora_run/wandb"
+  online: true                    # overridden by WANDB_MODE env var
+  append_uuid: false

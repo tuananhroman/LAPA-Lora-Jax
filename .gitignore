@@ -1,0 +1,28 @@
+# Output directories — host paths come from .env
+outputs/
+.cache/
+*.log
+
+# Downloaded assets (populated by setup.sh — not checked in)
+checkpoints/
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+
+# Environment
+.env
+
+# WandB
+wandb/

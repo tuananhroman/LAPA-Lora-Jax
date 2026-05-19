@@ -1,0 +1,80 @@
+# =============================================================================
+# LAPA LoRA-JAX  —  docker-compose
+#
+# Edit `.env` (copy from .env.example) BEFORE first run to point at your
+# checkpoint / data / output directories on the host.
+#
+# Quick start:
+#   cp .env.example .env       # then edit paths
+#   docker compose build
+#   docker compose run --rm train
+# =============================================================================
+
+services:
+  train:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: lapa-lora-jax:latest
+    container_name: lapa-lora-jax-train
+    runtime: nvidia
+    shm_size: "32g"
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    environment:
+      # GPU selection — override per-run with `docker compose run -e CUDA_VISIBLE_DEVICES=0,1 ...`
+      - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0,1,2,3}
+      - NVIDIA_VISIBLE_DEVICES=all
+      - XLA_PYTHON_CLIENT_MEM_FRACTION=${XLA_PYTHON_CLIENT_MEM_FRACTION:-0.82}
+
+      # WandB
+      - WANDB_API_KEY=${WANDB_API_KEY:-}
+      - WANDB_PROJECT=${WANDB_PROJECT:-lapa-lora-jax}
+      - WANDB_ENTITY=${WANDB_ENTITY:-}
+      - WANDB_MODE=${WANDB_MODE:-online}     # online | offline | disabled
+      - WANDB_RUN_NAME=${WANDB_RUN_NAME:-lapa_lora_run}
+
+      # Which YAML config under configs/ to use
+      - LAPA_CONFIG=${LAPA_CONFIG:-libero90_lora_v2.yaml}
+    volumes:
+      # Checkpoints (read-only) — initial LAPA-7B weights + any resume points
+      - ${LAPA_CHECKPOINT_DIR:-./checkpoints}:/checkpoints:ro
+      # Training data (read-only)
+      - ${LAPA_DATA_DIR:-./data/libero90_jsonl_v2}:/data:ro
+      # Outputs (writable) — saved checkpoints + wandb offline runs
+      - ${LAPA_OUTPUT_DIR:-./outputs}:/workspace/outputs
+      # XLA persistent compile cache (writable, big speedup on restarts)
+      - ${LAPA_CACHE_DIR:-./.cache/jax_compile}:/cache/jax_compile
+    working_dir: /opt/lapa-lora-jax
+    command: ["train"]
+
+  # ---------------------------------------------------------------------------
+  # preprocess — convert raw LIBERO-90 HDF5 → train.jsonl via VQGAN
+  #
+  # Usage:
+  #   docker compose run --rm preprocess            # auto-detect HF layout
+  #   docker compose run --rm preprocess --limit-files 3   # smoke test (3 files)
+  # ---------------------------------------------------------------------------
+  preprocess:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: lapa-lora-jax:latest
+    container_name: lapa-lora-jax-preprocess
+    runtime: nvidia
+    shm_size: "16g"
+    environment:
+      # Use a single GPU for VQGAN encoding (does not benefit from multi-GPU)
+      - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
+      - NVIDIA_VISIBLE_DEVICES=all
+      - XLA_PYTHON_CLIENT_MEM_FRACTION=0.6
+    volumes:
+      # LAPA-7B weights — needs vqgan sub-path (read-only)
+      - ${LAPA_CHECKPOINT_DIR:-./checkpoints}:/checkpoints:ro
+      # Raw LIBERO-90 HDF5 files (read-only)
+      - ${LAPA_RAW_DATA_DIR:-./data/raw}:/raw_data:ro
+      # Preprocessed output — train.jsonl, val.jsonl, bins.csv (writable)
+      - ${LAPA_DATA_DIR:-./data/libero90_jsonl_v2}:/processed_data
+    working_dir: /opt/lapa-lora-jax
+    command: ["preprocess"]

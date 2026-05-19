@@ -1,0 +1,93 @@
+# =============================================================================
+# LAPA-7B  Stage-3 LoRA fine-tune on LIBERO-90  —  v2 stable recipe
+#
+# This is the validated recipe (May 2026) that does NOT explode.
+# Key vs v1: lora_plus_ratio 16 → 4,  clip_gradient 5.0 → 1.0.
+# See docs/RECIPE.md for the diagnosis & rationale.
+# =============================================================================
+
+# ---- model / checkpoint ----
+model:
+  config: "7b"                   # load_llama_config
+  action_vocab_size: 245
+  delta_vocab_size: 8
+
+# Container paths — host paths come from .env via docker-compose volume mounts.
+checkpoint:
+  # `params::` loads weights only (fresh optimizer state). Use this when
+  # changing HPs or recovering from instability.
+  # `trainstate::` loads full state (params + optimizer + step counter).
+  load: "params::/checkpoints/params"
+  tokenizer: "/checkpoints/tokenizer.model"
+  save_optimizer_state: false
+  save_milestone_freq: 2500       # steps between full milestone checkpoints
+  autoresume: false
+
+data:
+  type: "json_vision_delta_action"
+  path: "/data/libero90_jsonl_v2/train.jsonl"
+  seq_length: 384
+  batch_size: 32
+  n_tokens_per_action: 7
+  n_tokens_per_delta: 4
+  max_n_frames: 1
+  img_aug: false
+  use_data_sharded_loader: true
+
+# ---- training ----
+train:
+  total_steps: 25000
+  log_freq: 10
+  eval_steps: 0
+  eval_log_freq: 100
+  save_model_freq: 0
+  modality: "vision,action,delta"
+  dtype: "bf16"
+  mesh_dim: "-1,2,1,1"            # dp, fsdp, tp, sp  (auto-fills dp = -1)
+
+# ---- optimizer (AdamW) ----
+optimizer:
+  type: "adamw"
+  lr: 2.0e-4
+  end_lr: 1.0e-5
+  lr_warmup_steps: 500
+  lr_decay_steps: 25000
+  weight_decay: 0.01
+  clip_gradient: 1.0              # v2: was 5.0 — caused explosion
+  bf16_momentum: true
+  accumulate_gradient_steps: 4    # effective batch = 32 * 4 = 128
+
+# ---- LoRA / LoRA+ ----
+lora:
+  enabled: true
+  rank: 64
+  alpha: 64
+  use_rslora: true                # scaling = alpha / sqrt(rank) = 8.0
+  plus_ratio: 4.0                 # v2: was 16.0 — caused explosion
+  train_patterns: "lora_A,lora_B,action_head,vision_head,delta_head"
+  heads_lr_multiplier: 2.0
+
+# ---- LLaMA inner config (passed verbatim) ----
+llama:
+  theta: 50000000
+  max_sequence_length: 2048
+  use_flash_attention: true
+  scan_attention: true
+  scan_query_chunk_size: 512
+  scan_key_chunk_size: 1024
+  remat_attention: "nothing_saveable"
+  scan_mlp: true
+  scan_mlp_chunk_size: 8192
+  remat_mlp: "nothing_saveable"
+  remat_block: "nothing_saveable"
+  scan_layers: true
+
+# ---- logging ----
+logger:
+  project_id: "lapa-lora-jax"
+  experiment_id: "libero90_lora_v2"
+  experiment_note: "v2_stable_loraplus4_clip1"
+  output_dir: "/workspace/outputs/libero90_lora_v2"
+  wandb_dir: "/workspace/outputs/libero90_lora_v2/wandb"
+  online: true                    # overridden by WANDB_MODE env var
+  append_uuid: false
