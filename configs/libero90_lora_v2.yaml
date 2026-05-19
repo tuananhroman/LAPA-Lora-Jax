@@ -4,6 +4,19 @@
 # This is the validated recipe (May 2026) that does NOT explode.
 # Key vs v1: lora_plus_ratio 16 → 4,  clip_gradient 5.0 → 1.0.
 # See docs/RECIPE.md for the diagnosis & rationale.
+#
+# --- How to use this file -----------------------------------------------
+# Drop into the configs/ folder of a cloned lapa-lora-jax repo, then:
+#
+#   bash scripts/run_docker.sh configs/libero90_lora_v2.yaml
+#
+# or, to override individual fields without editing the YAML:
+#
+#   bash scripts/run_docker.sh configs/libero90_lora_v2.yaml \
+#       -- train --override optimizer.lr=1e-4 --override lora.plus_ratio=2.0
+#
+# First time on a new machine?  Run setup first:
+#   bash scripts/setup.sh && docker compose build
 # =============================================================================
 
 # ---- model / checkpoint ----
