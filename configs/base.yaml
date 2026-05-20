@@ -54,6 +54,7 @@ lora:
   rank: 64
   alpha: 64
   use_rslora: true                # scaling = alpha / sqrt(rank)
+  dropout: 0.0
   plus_ratio: 4.0                 # lora_B lr = plus_ratio × lora_A lr
   train_patterns: "lora_A,lora_B,action_head,vision_head,delta_head"
   heads_lr_multiplier: 2.0

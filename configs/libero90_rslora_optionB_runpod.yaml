@@ -1,0 +1,96 @@
+# =============================================================================
+# LAPA-7B  Stage-3 LoRA fine-tune on LIBERO-90  —  rsLoRA Option B  (RunPod)
+#
+# Identical to libero90_rslora_optionB.yaml but with container-relative paths
+# so it works inside the RunPod Docker image without local path overrides.
+#
+# Volume layout expected (volume mounted at /workspace):
+#   /workspace/checkpoints/params
+#   /workspace/checkpoints/tokenizer.model
+#   /workspace/checkpoints/vqgan          ← needed for preprocess only
+#   /workspace/data/train.jsonl
+#   /workspace/outputs/                   ← writable, saved by training
+# =============================================================================
+
+# ---- model / checkpoint ----
+model:
+  config: "7b"
+  action_vocab_size: 245
+  delta_vocab_size: 8
+
+checkpoint:
+  load: "params::/checkpoints/params"
+  tokenizer: "/checkpoints/tokenizer.model"
+  save_optimizer_state: false
+  save_milestone_freq: 2500
+  autoresume: true                # auto-resume from latest milestone if it exists
+
+data:
+  type: "json_vision_delta_action"
+  path: "/data/train.jsonl"
+  seq_length: 384
+  batch_size: 32
+  n_tokens_per_action: 7
+  n_tokens_per_delta: 4
+  max_n_frames: 1
+  img_aug: false
+  use_data_sharded_loader: true
+
+# ---- training ----
+train:
+  total_steps: 15000
+  log_freq: 10
+  eval_steps: 0
+  eval_log_freq: 500
+  save_model_freq: 0
+  modality: "vision,action,delta"
+  dtype: "bf16"
+  mesh_dim: "-1,1,1,1"           # single-GPU safe; launch.py auto-adjusts for multi-GPU
+
+# ---- optimizer (AdamW) ----
+optimizer:
+  type: "adamw"
+  lr: 1.25e-4
+  end_lr: 1.25e-5
+  lr_warmup_steps: 100
+  lr_decay_steps: 15000
+  weight_decay: 0.01
+  clip_gradient: 3.0
+  bf16_momentum: true
+  accumulate_gradient_steps: 4
+
+# ---- LoRA ----
+lora:
+  enabled: true
+  rank: 32
+  alpha: 16
+  use_rslora: true
+  dropout: 0.0
+  plus_ratio: 1.0
+  train_patterns: "lora_A,lora_B,action_head"
+  heads_lr_multiplier: 2.0
+
+# ---- LLaMA inner config ----
+llama:
+  theta: 50000000
+  max_sequence_length: 2048
+  use_flash_attention: true
+  scan_attention: true
+  scan_query_chunk_size: 512
+  scan_key_chunk_size: 1024
+  remat_attention: "nothing_saveable"
+  scan_mlp: true
+  scan_mlp_chunk_size: 8192
+  remat_mlp: "nothing_saveable"
+  remat_block: "nothing_saveable"
+  scan_layers: true
+
+# ---- logging ----
+logger:
+  project_id: "lapa-lora-jax"
+  experiment_id: "libero90_rslora_r32_a16_runpod"
+  experiment_note: "rslora_r32_a16_scale2p83_lr125e4_wd001_clip3_actionhead_15k"
+  output_dir: "/workspace/outputs/libero90_rslora_r32_a16"
+  wandb_dir: "/workspace/outputs/libero90_rslora_r32_a16/wandb"
+  online: true
+  append_uuid: false

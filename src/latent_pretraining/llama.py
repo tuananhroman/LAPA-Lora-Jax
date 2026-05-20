@@ -212,6 +212,7 @@ class LLaMAConfig(PretrainedConfig):
         lora_rank=0,
         lora_alpha=16.0,
         use_rslora=False,
+        lora_dropout=0.0,
         **kwargs,
     ):
         self.vocab_size = vocab_size
@@ -245,6 +246,7 @@ class LLaMAConfig(PretrainedConfig):
         self.lora_rank = lora_rank
         self.lora_alpha = lora_alpha
         self.use_rslora = use_rslora
+        self.lora_dropout = lora_dropout
         super().__init__(
             bos_token_id=bos_token_id,
             eos_token_id=eos_token_id,
@@ -488,9 +490,10 @@ class LoRADense(nn.Module):
     lora_rank: int = 0
     lora_alpha: float = 16.0
     use_rslora: bool = False
+    lora_dropout: float = 0.0
 
     @nn.compact
-    def __call__(self, x):
+    def __call__(self, x, deterministic: bool = True):
         in_features = x.shape[-1]
         kernel = self.param('kernel', self.kernel_init, (in_features, self.features), self.param_dtype)
         # When LoRA is enabled, the base kernel is frozen; stop the gradient w.r.t. the
@@ -508,8 +511,9 @@ class LoRADense(nn.Module):
                 (self.lora_rank, self.features), self.param_dtype,
             )
             scaling = self.lora_alpha / (jnp.sqrt(self.lora_rank) if self.use_rslora else self.lora_rank)
-            delta = jnp.matmul(jnp.matmul(x, lora_a.astype(self.dtype), precision=self.precision),
-                               lora_b.astype(self.dtype), precision=self.precision)
+            lora_a_out = jnp.matmul(x, lora_a.astype(self.dtype), precision=self.precision)
+            lora_a_out = nn.Dropout(rate=self.lora_dropout)(lora_a_out, deterministic=deterministic)
+            delta = jnp.matmul(lora_a_out, lora_b.astype(self.dtype), precision=self.precision)
             y = y + scaling * delta
         return y
 
@@ -535,6 +539,7 @@ class FlaxLLaMAAttention(nn.Module):
             lora_rank=config.lora_rank,
             lora_alpha=config.lora_alpha,
             use_rslora=config.use_rslora,
+            lora_dropout=config.lora_dropout,
         )
         self.wk = LoRADense(
             config.num_attention_heads*self.head_dim,
@@ -545,6 +550,7 @@ class FlaxLLaMAAttention(nn.Module):
             lora_rank=config.lora_rank,
             lora_alpha=config.lora_alpha,
             use_rslora=config.use_rslora,
+            lora_dropout=config.lora_dropout,
         )
         self.wv = LoRADense(
             config.num_attention_heads*self.head_dim,
@@ -555,6 +561,7 @@ class FlaxLLaMAAttention(nn.Module):
             lora_rank=config.lora_rank,
             lora_alpha=config.lora_alpha,
             use_rslora=config.use_rslora,
+            lora_dropout=config.lora_dropout,
         )
         self.wo = LoRADense(
             config.hidden_size,
@@ -565,6 +572,7 @@ class FlaxLLaMAAttention(nn.Module):
             lora_rank=config.lora_rank,
             lora_alpha=config.lora_alpha,
             use_rslora=config.use_rslora,
+            lora_dropout=config.lora_dropout,
         )
 
         self.resid_dropout = nn.Dropout(rate=config.resid_pdrop)
@@ -654,7 +662,7 @@ class FlaxLLaMAAttention(nn.Module):
         output_attentions: bool = False,
         fcm_mask=None,
     ):
-        xq, xk, xv = self.wq(hidden_states), self.wk(hidden_states), self.wv(hidden_states)
+        xq, xk, xv = self.wq(hidden_states, deterministic=deterministic), self.wk(hidden_states, deterministic=deterministic), self.wv(hidden_states, deterministic=deterministic)
 
         if xq.shape[1] == 1:
             xq = with_sharding_constraint(xq, PS(("dp", "fsdp"), None, "tp"))
@@ -769,7 +777,7 @@ class FlaxLLaMAAttention(nn.Module):
             )
 
         attn_output = self._merge_heads(attn_output)
-        attn_output = self.wo(attn_output)
+        attn_output = self.wo(attn_output, deterministic=deterministic)
         attn_output = self.resid_dropout(attn_output, deterministic=deterministic)
         outputs = (attn_output, attn_weights) if output_attentions else (attn_output,)
         return outputs
@@ -793,6 +801,7 @@ class FlaxLLaMAMLP(nn.Module):
             lora_rank=config.lora_rank,
             lora_alpha=config.lora_alpha,
             use_rslora=config.use_rslora,
+            lora_dropout=config.lora_dropout,
         )
         self.w2 = LoRADense(
             config.hidden_size,
@@ -803,6 +812,7 @@ class FlaxLLaMAMLP(nn.Module):
             lora_rank=config.lora_rank,
             lora_alpha=config.lora_alpha,
             use_rslora=config.use_rslora,
+            lora_dropout=config.lora_dropout,
         )
         self.w3 = LoRADense(
             config.intermediate_size,
@@ -813,11 +823,12 @@ class FlaxLLaMAMLP(nn.Module):
             lora_rank=config.lora_rank,
             lora_alpha=config.lora_alpha,
             use_rslora=config.use_rslora,
+            lora_dropout=config.lora_dropout,
         )
         self.dropout = nn.Dropout(rate=self.config.resid_pdrop)
 
     def __call__(self, x: jnp.ndarray, deterministic: bool = True) -> jnp.ndarray:
-        x = self.w2(nn.silu(self.w1(x)) * self.w3(x))
+        x = self.w2(nn.silu(self.w1(x, deterministic=deterministic)) * self.w3(x, deterministic=deterministic), deterministic=deterministic)
         x = self.dropout(x, deterministic=deterministic)
         return x
 

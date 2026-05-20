@@ -145,6 +145,7 @@ def build_args(cfg: dict, n_gpus: int) -> list[str]:
         f"--llama.lora_rank={lora['rank']}",
         f"--llama.lora_alpha={lora['alpha']}",
         f"--llama.use_rslora={lora['use_rslora']}",
+        f"--llama.lora_dropout={lora.get('dropout', 0.0)}",
         f"--lora_plus_ratio={lora['plus_ratio']}",
         f"--lora_train_patterns={lora['train_patterns']}",
         f"--heads_lr_multiplier={lora['heads_lr_multiplier']}",

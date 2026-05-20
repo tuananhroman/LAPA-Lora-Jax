@@ -1,19 +1,20 @@
 # =============================================================================
-# LAPA-7B  Stage-3 LoRA fine-tune on LIBERO-90  —  rsLoRA Option B
+# LAPA-7B  Stage-3 LoRA fine-tune on LIBERO-90  —  rsLoRA r128
 #
-# rsLoRA rank=32, alpha=16 run.
-#   rsLoRA scale = alpha/√rank = 16/√32 ≈ 2.83
-#   lr=1.25e-4, warmup=100, weight_decay=0.01, clip=3.0
+# rsLoRA rank=128, alpha=64.
+#   rsLoRA scale = alpha/√rank = 64/√128 ≈ 5.66
+#   lr=1.0e-4, warmup=150, weight_decay=0.01, clip=3.0
 #   trainable heads: action_head only (vision_head, delta_head frozen)
 #   target_modules: wq,wk,wv,wo,w1,w2,w3 (all attn+mlp — model default)
-#   lora.dropout                 0.0
+#   lora_dropout: 0.05 NOTE — not configurable via YAML (hardcoded 0.0 in train.py)
 #
 # --- Key settings --------------------------------------------------------
-#   lora.rank                    32
-#   lora.alpha                   16   (rsLoRA scale ≈ 2.83)
-#   optimizer.lr              1.25e-4
-#   optimizer.end_lr          1.25e-5  (10× cosine tail)
-#   optimizer.lr_warmup_steps   100
+#   lora.rank                   128
+#   lora.alpha                   64   (rsLoRA scale ≈ 5.66)
+#   lora.plus_ratio             1.0   (lora_B lr == lora_A lr)
+#   optimizer.lr              1.0e-4
+#   optimizer.end_lr          1.0e-5
+#   optimizer.lr_warmup_steps   150
 #   optimizer.lr_decay_steps  15000
 #   optimizer.weight_decay     0.01
 #   optimizer.clip_gradient     3.0
@@ -21,14 +22,7 @@
 #   lora.train_patterns  lora_A,lora_B,action_head  (heads: action_head only)
 #
 # --- How to run ----------------------------------------------------------
-#   bash scripts/run_docker.sh configs/libero90_rslora_optionB.yaml
-#
-# Override any field without editing this file:
-#   bash scripts/run_docker.sh configs/libero90_rslora_optionB.yaml \
-#       -- train --override optimizer.lr=8e-5
-#
-# First time on a new machine?  Run setup first:
-#   bash scripts/setup.sh && docker compose build
+#   bash scripts/run_docker.sh configs/libero90_rslora_r128.yaml
 # =============================================================================
 
 # ---- model / checkpoint ----
@@ -59,8 +53,8 @@ data:
 train:
   total_steps: 15000
   log_freq: 10
-  eval_steps: 0                   # disabled — eval_dataset not configured for native run
-  eval_log_freq: 500              # (unused when eval_steps=0)
+  eval_steps: 0
+  eval_log_freq: 500
   save_model_freq: 0
   modality: "vision,action,delta"
   dtype: "bf16"
@@ -69,9 +63,9 @@ train:
 # ---- optimizer (AdamW) ----
 optimizer:
   type: "adamw"
-  lr: 1.25e-4
-  end_lr: 1.25e-5                 # 10× cosine tail
-  lr_warmup_steps: 100
+  lr: 1.0e-4
+  end_lr: 1.0e-5
+  lr_warmup_steps: 150
   lr_decay_steps: 15000
   weight_decay: 0.01
   clip_gradient: 3.0
@@ -81,12 +75,12 @@ optimizer:
 # ---- LoRA ----
 lora:
   enabled: true
-  rank: 32
-  alpha: 16                       # rsLoRA scale = 16/√32 ≈ 2.83
+  rank: 128
+  alpha: 64                       # rsLoRA scale = 64/√128 ≈ 5.66
   use_rslora: true
-  dropout: 0.0
-  plus_ratio: 1.0                 # disabled: lora_B lr == lora_A lr
-  train_patterns: "lora_A,lora_B,action_head"   # heads: action_head only
+  dropout: 0.05
+  plus_ratio: 1.0                 # lora_B lr == lora_A lr
+  train_patterns: "lora_A,lora_B,action_head"
   heads_lr_multiplier: 2.0
 
 # ---- LLaMA inner config ----
@@ -107,9 +101,9 @@ llama:
 # ---- logging ----
 logger:
   project_id: "lapa-lora-jax"
-  experiment_id: "libero90_rslora_r32_a16"
-  experiment_note: "rslora_r32_a16_scale2p83_lr125e4_wd001_clip3_actionhead_15k"
-  output_dir: "/mnt/hdd/Linh/lapa_finetune_libero90_out/libero90_rslora_r32_a16"
-  wandb_dir: "/mnt/hdd/Linh/lapa_finetune_libero90_out/libero90_rslora_r32_a16/wandb"
+  experiment_id: "libero90_rslora_r128_a64"
+  experiment_note: "rslora_r128_a64_scale5p66_lr1e4_wd001_clip3_actionhead_15k"
+  output_dir: "/mnt/hdd/Linh/lapa_finetune_libero90_out/libero90_rslora_r128_a64"
+  wandb_dir: "/mnt/hdd/Linh/lapa_finetune_libero90_out/libero90_rslora_r128_a64/wandb"
   online: true
   append_uuid: false
