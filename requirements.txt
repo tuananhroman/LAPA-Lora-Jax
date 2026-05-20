@@ -13,6 +13,7 @@ git+https://github.com/lhao499/tux.git@main
 # Data + tokenization
 transformers==4.29.2
 datasets==2.13.0
+pyarrow>=8.0.0,<14.0.0
 sentencepiece
 tiktoken
 einops
